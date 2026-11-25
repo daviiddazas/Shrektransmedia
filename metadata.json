@@ -1,0 +1,6 @@
+{
+  "name": "Shrek: Un Cuento que Cobra Vida",
+  "description": "Experiencia interactiva de narrativa transmedia en español con libro mágico medieval, tablero 3D de Muy Muy Lejano, narración por voz y modo docente.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
