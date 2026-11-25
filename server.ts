@@ -9,18 +9,53 @@ import { GoogleGenAI } from '@google/genai';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
+import { transformWavBuffer } from './src/audio/pitchProcessor';
+import { VoiceRegister } from './src/types/story';
+
 const PORT = Number(process.env.PORT || 3000);
 const TTS_MODEL = 'gemini-3.8-flash-tts';
 const TTS_LITE_MODEL = 'gemini-3.8-flash-lite-tts';
-const VALID_VOICES = new Set(['Puck', 'Charon', 'Kore', 'Fenrir', 'Zephyr']);
+const VALID_VOICES = new Set([
+  'Puck',
+  'Charon',
+  'Kore',
+  'Fenrir',
+  'Zephyr',
+  'Aoede',
+  'Leda',
+  'Despina',
+  'Orus',
+  'Algenib',
+  'Achird',
+]);
+const CORE_VOICE_FALLBACK: Record<string, CoreVoiceName> = {
+  Aoede: 'Kore',
+  Leda: 'Kore',
+  Despina: 'Kore',
+  Orus: 'Charon',
+  Algenib: 'Fenrir',
+  Achird: 'Puck',
+};
 const CACHE_DIR = '/tmp/shrek-tts-cache';
 const MAX_MEM_CACHE = 80;
 
-type VoiceName = 'Puck' | 'Charon' | 'Kore' | 'Fenrir' | 'Zephyr';
+type CoreVoiceName = 'Puck' | 'Charon' | 'Kore' | 'Fenrir' | 'Zephyr';
+type VoiceName =
+  | CoreVoiceName
+  | 'Aoede'
+  | 'Leda'
+  | 'Despina'
+  | 'Orus'
+  | 'Algenib'
+  | 'Achird';
 
 interface ArchetypeDefault {
   voiceId: string;
   voiceName: VoiceName;
+  gender: 'masculino' | 'femenino';
+  register: VoiceRegister;
+  pitch: number;
+  rate: number;
   style: string;
   defaultActingInstruction: string;
 }
@@ -29,74 +64,110 @@ const ARCHETYPE_DEFAULTS: Record<string, ArchetypeDefault> = {
   narrador: {
     voiceId: 'VOICE_NARRATOR',
     voiceName: 'Charon',
+    gender: 'masculino',
+    register: 'grave',
+    pitch: 0.78,
+    rate: 0.92,
     style:
-      'Voz adulta de registro medio-grave, cálida, envolvente y perfectamente articulada en español latinoamericano natural y neutral. Suena como quien narra un cuento cinematográfico frente a un público vivo, con cadencia orgánica, misterio y emoción sin lectura mecánica.',
+      'Voz masculina adulta de registro grave, cálida, envolvente y perfectamente articulada en español latinoamericano natural y neutral. Suena como quien narra un cuento cinematográfico frente a un público vivo.',
     defaultActingInstruction:
       'Narración cinematográfica de cuento clásico; ritmo pausado y envolvente, creando expectativa.',
   },
   shrek: {
     voiceId: 'VOICE_SHREK',
     voiceName: 'Fenrir',
+    gender: 'masculino',
+    register: 'muy-grave',
+    pitch: 0.52,
+    rate: 0.84,
     style:
-      'Voz masculina grave, robusta, con resonancia de pecho y textura ligeramente áspera en español latinoamericano natural. Registro bajo, articulación orgánica y ritmo pausado; humor seco, ironía e impaciencia ocasional, con ternura genuina al hablar de Fiona o su familia. Nunca suena como locutor.',
+      'Voz masculina MUY GRAVE, profunda, robusta, con fuerte resonancia de pecho y textura ligeramente áspera en español latinoamericano natural. Ritmo pausado, humor seco e impaciencia ocasional, con ternura genuina al hablar de Fiona o su familia.',
     defaultActingInstruction:
-      'Habla con ritmo pausado, registro grave y humor seco; impaciencia contenida con fondo sincero.',
+      'Habla con registro muy grave y resonante, ritmo pausado y humor seco; impaciencia contenida con fondo sincero.',
   },
   burro: {
     voiceId: 'VOICE_DONKEY',
     voiceName: 'Puck',
+    gender: 'masculino',
+    register: 'agudo',
+    pitch: 1.78,
+    rate: 1.24,
     style:
-      'Voz masculina de registro medio-agudo, brillante, expresiva y ligeramente nasal en español latinoamericano natural. Ritmo rápido, entusiasmo contagioso, espontaneidad, sorpresa, humor e inflexiones cambiantes incluso en frases cortas.',
+      'Voz masculina de registro AGUDO, brillante, muy expresiva y ligeramente nasal en español latinoamericano natural. Ritmo muy rápido, entusiasmo desbordante, espontaneidad, sorpresa, humor e inflexiones altas incluso en frases cortas.',
     defaultActingInstruction:
-      'Ritmo ágil y suelto, energía alta, entonación ascendente de sorpresa o entusiasmo y humor espontáneo.',
+      'Voz aguda con ritmo muy ágil, energía alta, entonación ascendente de entusiasmo y humor espontáneo.',
   },
   fiona: {
     voiceId: 'VOICE_FIONA',
-    voiceName: 'Kore',
+    voiceName: 'Aoede',
+    gender: 'femenino',
+    register: 'medio-alto',
+    pitch: 1.56,
+    rate: 1.02,
     style:
-      'Voz femenina de registro medio, cálida, clara, firme y expresiva en español latinoamericano natural. Proyecta seguridad, inteligencia, cercanía, valentía y ternura equilibrada, evitando sonar infantil o demasiado solemne.',
+      'Voz claramente FEMENINA de mujer adulta joven, registro medio-alto luminoso, cálida, melodiosa, firme y muy expresiva en español latinoamericano natural. Suena inequívocamente como una mujer segura, inteligente y valiente.',
     defaultActingInstruction:
-      'Tono firme y cercano, articulación clara; alterna calidez honesta y determinación valiente.',
+      'Tono femenino claro, cercano y decidido; alterna dulzura luminosa y determinación valiente.',
   },
   gato: {
     voiceId: 'VOICE_PUSS',
-    voiceName: 'Charon',
+    voiceName: 'Orus',
+    gender: 'masculino',
+    register: 'medio',
+    pitch: 0.94,
+    rate: 0.9,
     style:
-      'Voz masculina de registro medio, cálida, teatral, elegante y con dicción precisa en español latinoamericano natural y neutral. Interpretación dramática en su justa medida, persuasiva, aventurera, pícara y segura.',
+      'Voz masculina de registro medio, aterciopelada, teatral, elegante y con dicción precisa en español latinoamericano natural y neutral. Interpretación dramática en su justa medida, persuasiva, aventurera, pícara y segura.',
     defaultActingInstruction:
       'Interpretación teatral, elegante y segura en español latinoamericano neutral; pausas breves y toque pícaro.',
   },
   farquaad: {
     voiceId: 'VOICE_FARQUAAD',
     voiceName: 'Puck',
+    gender: 'masculino',
+    register: 'medio-alto',
+    pitch: 1.24,
+    rate: 1.08,
     style:
-      'Voz masculina de registro medio-agudo, limpia, controlada y con pronunciación precisa en español latinoamericano natural. Tono autoritario, presumido, rígido, mandón y exageradamente formal.',
+      'Voz masculina de registro medio-agudo, algo apretada, nasal y con pronunciación rígida en español latinoamericano natural. Tono autoritario, presumido, mandón y exageradamente formal.',
     defaultActingInstruction:
-      'Dicción exacta y tensa; tono autoritario, rígido y exageradamente formal.',
+      'Dicción tensa y exacta; tono autoritario, rígido y exageradamente formal.',
   },
   hada: {
     voiceId: 'VOICE_FAIRY_GODMOTHER',
-    voiceName: 'Zephyr',
+    voiceName: 'Kore',
+    gender: 'femenino',
+    register: 'medio-alto',
+    pitch: 1.44,
+    rate: 0.94,
     style:
-      'Voz femenina madura, de registro medio, brillante y envolvente en español latinoamericano natural. Proyecta elegancia, persuasión y dulzura superficial, dejando sentir seguridad, ironía y amenaza sutil.',
+      'Voz inequívocamente FEMENINA madura, soprano-mezzo brillante, glamorosa, melosa y envolvente en español latinoamericano natural. Proyecta dulzura teatral por fuera y firmeza calculadora e ironía por debajo.',
     defaultActingInstruction:
-      'Tono meloso, elegante y controlado en la superficie, con ironía fina y firmeza persuasiva.',
+      'Voz femenina melosa, glamorosa y controlada en la superficie, con ironía fina y firmeza persuasiva debajo.',
   },
   principe: {
     voiceId: 'VOICE_CHARMING',
-    voiceName: 'Puck',
+    voiceName: 'Achird',
+    gender: 'masculino',
+    register: 'medio-alto',
+    pitch: 1.08,
+    rate: 0.93,
     style:
-      'Voz masculina de registro medio-agudo, pulida y teatral en español latinoamericano natural. Transmite vanidad, presunción, dramatismo, exceso de confianza y entonación exageradamente elegante.',
+      'Voz masculina limpia, brillante y afectada en español latinoamericano natural. Transmite vanidad, presunción, exceso de confianza y entonación exageradamente elegante.',
     defaultActingInstruction:
-      'Entonación pulida, confiada y exageradamente elegante; dramatismo vanidoso y sonrisa ensayada.',
+      'Entonación brillante, confiada y exageradamente elegante; dramatismo vanidoso y sonrisa ensayada.',
   },
   jengibre: {
     voiceId: 'VOICE_GINGY',
-    voiceName: 'Puck',
+    voiceName: 'Leda',
+    gender: 'masculino',
+    register: 'muy-agudo',
+    pitch: 2.08,
+    rate: 1.28,
     style:
-      'Voz masculina aguda, ligera, vivaz y muy expresiva en español latinoamericano natural. Combina rapidez, nerviosismo chispeante, valentía frente al peligro, sorpresa y humor sin caer en distorsión artificial.',
+      'Voz BIEN AGUDA, finísima, chillona, veloz y chispeante de personaje diminuto en español latinoamericano natural. Combina tono muy alto, rapidez nerviosa, valentía frente al peligro y humor desbordante.',
     defaultActingInstruction:
-      'Habla rápido y con chispa aguda; mezcla tensión nerviosa con valentía desafiante.',
+      'Tono bien agudo y rápido; mezcla tensión nerviosa con valentía desafiante y chispa cómica.',
   },
 };
 
@@ -290,69 +361,98 @@ function mergeWavBuffersServer(clips: Buffer[]): Buffer {
   return out;
 }
 
+function resolveFallbackCoreVoice(voiceName: VoiceName): CoreVoiceName {
+  return CORE_VOICE_FALLBACK[voiceName] ?? (VALID_VOICES.has(voiceName) ? (voiceName as CoreVoiceName) : 'Kore');
+}
+
+async function callGeminiTtsOnce(
+  ai: GoogleGenAI,
+  model: string,
+  text: string,
+  style: string,
+  voiceName: VoiceName,
+): Promise<Buffer> {
+  const response = await ai.models.generateContent({
+    model,
+    contents: [
+      {
+        role: 'user',
+        parts: [
+          {
+            text,
+            speechMetadata: {
+              style,
+            },
+          } as unknown as { text: string },
+        ],
+      },
+    ],
+    config: {
+      responseModalities: ['AUDIO'],
+      speechConfig: {
+        voiceConfig: {
+          prebuiltVoiceConfig: { voiceName },
+        },
+      },
+    },
+  });
+
+  const candidate = response.candidates?.[0];
+  const parts = candidate?.content?.parts ?? [];
+  for (const part of parts) {
+    const inline = (part as { inlineData?: { data?: string } }).inlineData;
+    if (inline?.data) {
+      return Buffer.from(inline.data, 'base64');
+    }
+  }
+  const finishReason = candidate?.finishReason ?? 'UNKNOWN';
+  throw new Error(`El modelo no devolvió audio (motivo: ${finishReason}).`);
+}
+
 async function synthesizeSingleClip(
   ai: GoogleGenAI,
   text: string,
   style: string,
   voiceName: VoiceName,
-  model: string = TTS_MODEL,
-): Promise<{ buffer: Buffer; cached: boolean }> {
+  preferredModel: string = TTS_LITE_MODEL,
+): Promise<{ buffer: Buffer; cached: boolean; usedModel: string; usedVoice: VoiceName }> {
   const cacheKey = buildAudioCacheKey({
-    v: 2,
-    model,
+    v: 3,
+    model: preferredModel,
     voiceName,
     style,
     text,
   });
   const cached = getCachedWav(cacheKey);
   if (cached) {
-    return { buffer: cached, cached: true };
+    return { buffer: cached, cached: true, usedModel: preferredModel, usedVoice: voiceName };
   }
 
-  let lastErr: unknown;
-  for (let attempt = 0; attempt < 2; attempt++) {
-    try {
-      const response = await ai.models.generateContent({
-        model,
-        contents: [
-          {
-            role: 'user',
-            parts: [
-              {
-                text,
-                speechMetadata: {
-                  style,
-                },
-              } as unknown as { text: string },
-            ],
-          },
-        ],
-        config: {
-          responseModalities: ['AUDIO'],
-          speechConfig: {
-            voiceConfig: {
-              prebuiltVoiceConfig: { voiceName },
-            },
-          },
-        },
-      });
+  const candidateModels =
+    preferredModel === TTS_MODEL ? [TTS_MODEL, TTS_LITE_MODEL] : [TTS_LITE_MODEL];
+  const candidateVoices: VoiceName[] =
+    voiceName in CORE_VOICE_FALLBACK
+      ? [voiceName, resolveFallbackCoreVoice(voiceName)]
+      : [voiceName];
 
-      const candidate = response.candidates?.[0];
-      const parts = candidate?.content?.parts ?? [];
-      for (const part of parts) {
-        const inline = (part as { inlineData?: { data?: string } }).inlineData;
-        if (inline?.data) {
-          const buf = Buffer.from(inline.data, 'base64');
-          setCachedWav(cacheKey, buf);
-          return { buffer: buf, cached: false };
+  let lastErr: unknown;
+  for (const model of candidateModels) {
+    for (const vName of candidateVoices) {
+      try {
+        const buf = await callGeminiTtsOnce(ai, model, text, style, vName);
+        setCachedWav(cacheKey, buf);
+        return { buffer: buf, cached: false, usedModel: model, usedVoice: vName };
+      } catch (err) {
+        lastErr = err;
+        const msg = err instanceof Error ? err.message : String(err);
+        // If quota exhausted on flagship model, break inner voice loop to try Lite model immediately
+        if (/429|RESOURCE_EXHAUSTED|quota/i.test(msg)) {
+          break;
         }
-      }
-      const finishReason = candidate?.finishReason ?? 'UNKNOWN';
-      throw new Error(`El modelo no devolvió audio (motivo: ${finishReason}).`);
-    } catch (err) {
-      lastErr = err;
-      if (attempt === 0) {
-        await new Promise((r) => setTimeout(r, 450));
+        // If voice name wasn't accepted, continue inner loop to core fallback voice; otherwise retry once
+        if (!/voice|400|INVALID_ARGUMENT|not found/i.test(msg)) {
+          await new Promise((r) => setTimeout(r, 300));
+        }
       }
     }
   }
@@ -392,7 +492,7 @@ async function synthesizeDualSpeakerScene(
   const speakerVoiceConfigs = Array.from(speakerMap.entries()).map(([speaker, voiceName]) => ({
     speaker,
     voiceConfig: {
-      prebuiltVoiceConfig: { voiceName },
+      prebuiltVoiceConfig: { voiceName: resolveFallbackCoreVoice(voiceName) },
     },
   }));
 
@@ -520,13 +620,14 @@ async function startServer() {
         ? actingInstruction.trim().slice(0, 500)
         : def.defaultActingInstruction;
     const exprNum = typeof expressivity === 'number' ? expressivity : 0.8;
-    const rateNum = typeof rate === 'number' ? rate : 1.0;
-    const model = useLiteModel === true ? TTS_LITE_MODEL : TTS_MODEL;
+    const rateNum = typeof rate === 'number' ? rate : def.rate;
+    // Default to high-throughput gemini-3.8-flash-lite-tts unless flagship explicitly requested
+    const model = useLiteModel === false ? TTS_MODEL : TTS_LITE_MODEL;
 
     const fullStyle = buildComposedStyle(baseStyle, acting, exprNum, rateNum);
 
     try {
-      const { buffer, cached } = await synthesizeSingleClip(
+      const { buffer, cached, usedModel, usedVoice } = await synthesizeSingleClip(
         ai,
         text.trim(),
         fullStyle,
@@ -535,10 +636,10 @@ async function startServer() {
       );
       const audioBase64 = buffer.toString('base64');
       res.json({
-        model,
+        model: usedModel,
         voiceId: typeof voiceId === 'string' ? voiceId : def.voiceId,
         archetypeName: typeof archetypeName === 'string' ? archetypeName : '',
-        voiceName: chosenVoice,
+        voiceName: usedVoice,
         mimeType: 'audio/wav',
         cached,
         durationMs: estimateWavDurationMs(buffer),
@@ -656,7 +757,18 @@ async function startServer() {
         for (let i = 0; i < parsedLines.length; i++) {
           const line = parsedLines[i];
           const fallback = ARCHETYPE_DEFAULTS[line.characterKey] ?? ARCHETYPE_DEFAULTS.narrador;
-          const customProfile = profiles?.[line.characterKey];
+          const customProfile = profiles?.[line.characterKey] as
+            | {
+                voicePrompt?: string;
+                geminiVoiceName?: string;
+                defaultActingInstruction?: string;
+                expressivity?: number;
+                rate?: number;
+                pitch?: number;
+                gender?: 'masculino' | 'femenino';
+                register?: VoiceRegister;
+              }
+            | undefined;
           const baseStyle =
             typeof customProfile?.voicePrompt === 'string' && customProfile.voicePrompt.trim()
               ? customProfile.voicePrompt.trim()
@@ -666,17 +778,25 @@ async function startServer() {
             baseStyle,
             line.stageDirection || customProfile?.defaultActingInstruction || cleanInstructions,
             customProfile?.expressivity ?? 0.82,
-            customProfile?.rate ?? 1.0,
+            customProfile?.rate ?? fallback.rate,
           );
 
-          const { buffer } = await synthesizeSingleClip(
+          const { buffer: rawBuf } = await synthesizeSingleClip(
             ai,
             line.dialogue,
             fullStyle,
             voiceName,
-            TTS_MODEL,
+            TTS_LITE_MODEL,
           );
-          const dur = estimateWavDurationMs(buffer);
+          const sculptedBuf = Buffer.from(
+            transformWavBuffer(new Uint8Array(rawBuf), {
+              pitch: customProfile?.pitch ?? fallback.pitch,
+              rate: customProfile?.rate ?? fallback.rate,
+              gender: customProfile?.gender ?? fallback.gender,
+              register: customProfile?.register ?? fallback.register,
+            }),
+          );
+          const dur = estimateWavDurationMs(sculptedBuf);
           segments.push({
             index: i,
             speaker: line.speakerLabel,
@@ -686,13 +806,13 @@ async function startServer() {
             endMs: cursorMs + dur,
           });
           cursorMs += dur;
-          clips.push(buffer);
+          clips.push(sculptedBuf);
         }
 
         const merged = mergeWavBuffersServer(clips);
         const audioBase64 = merged.toString('base64');
         res.json({
-          model: TTS_MODEL,
+          model: TTS_LITE_MODEL,
           mode: 'multi_cast',
           lineCount: parsedLines.length,
           mimeType: 'audio/wav',
@@ -708,7 +828,7 @@ async function startServer() {
         ? `${cleanInstructions}\n${script.trim()}`
         : `${cleanInstructions}\n[Guion]\n${script.trim()}`;
 
-      const { buffer, cached } = await synthesizeSingleClip(
+      const { buffer, cached, usedModel } = await synthesizeSingleClip(
         ai,
         fullPrompt,
         'Director y actor de doblaje en español latinoamericano natural dando a cada personaje un cambio notorio pero orgánico según su género, registro, ritmo y calidez. Lee únicamente los diálogos; jamás leas nombres de personajes ni texto entre paréntesis o corchetes.',
@@ -717,7 +837,7 @@ async function startServer() {
       );
       const audioBase64 = buffer.toString('base64');
       res.json({
-        model: TTS_MODEL,
+        model: usedModel,
         mode: 'single_actor',
         cached,
         mimeType: 'audio/wav',
@@ -758,6 +878,9 @@ async function startServer() {
           defaultActingInstruction?: string;
           expressivity?: number;
           rate?: number;
+          pitch?: number;
+          gender?: 'masculino' | 'femenino';
+          register?: VoiceRegister;
         }
       >;
     };
@@ -797,17 +920,25 @@ async function startServer() {
           baseStyle,
           acting,
           custom?.expressivity ?? 0.85,
-          custom?.rate ?? 1.0,
+          custom?.rate ?? fallback.rate,
         );
 
-        const { buffer, cached } = await synthesizeSingleClip(
+        const { buffer: rawBuf, cached } = await synthesizeSingleClip(
           ai,
           item.text.trim(),
           fullStyle,
           voiceName,
-          TTS_MODEL,
+          TTS_LITE_MODEL,
         );
-        const dur = estimateWavDurationMs(buffer);
+        const sculptedBuf = Buffer.from(
+          transformWavBuffer(new Uint8Array(rawBuf), {
+            pitch: custom?.pitch ?? fallback.pitch,
+            rate: custom?.rate ?? fallback.rate,
+            gender: custom?.gender ?? fallback.gender,
+            register: custom?.register ?? fallback.register,
+          }),
+        );
+        const dur = estimateWavDurationMs(sculptedBuf);
         segments.push({
           characterId: charKey,
           voiceId: item.voiceId || custom?.voiceId || fallback.voiceId,
@@ -818,13 +949,13 @@ async function startServer() {
           cached,
         });
         cursorMs += dur;
-        clips.push(buffer);
+        clips.push(sculptedBuf);
       }
 
       const merged = mergeWavBuffersServer(clips);
       const audioBase64 = merged.toString('base64');
       res.json({
-        model: TTS_MODEL,
+        model: TTS_LITE_MODEL,
         mimeType: 'audio/wav',
         totalDurationMs: cursorMs,
         segments,

@@ -39,9 +39,26 @@ export type VoiceId =
   | 'VOICE_CHARMING'
   | 'VOICE_GINGY';
 
-export type GeminiVoiceName = 'Puck' | 'Charon' | 'Kore' | 'Fenrir' | 'Zephyr';
+export type GeminiVoiceName =
+  | 'Puck'
+  | 'Charon'
+  | 'Kore'
+  | 'Fenrir'
+  | 'Zephyr'
+  | 'Aoede'
+  | 'Leda'
+  | 'Despina'
+  | 'Orus'
+  | 'Algenib'
+  | 'Achird';
 
-export type VoiceRegister = 'grave' | 'medio' | 'medio-alto' | 'agudo';
+export type VoiceRegister =
+  | 'muy-grave'
+  | 'grave'
+  | 'medio'
+  | 'medio-alto'
+  | 'agudo'
+  | 'muy-agudo';
 
 export interface VoiceProfile {
   characterId: CharacterId;

@@ -63,7 +63,7 @@ Príncipe Encantador: (Medio-agudo, pulido y vanidoso) Francamente, es obvio qui
 Jengibre: (Agudo, rápido, nervioso y valiente) ¡Oye, no me subestimen por ser pequeño! ¡Soy rápido, valiente y tengo más carácter que medio castillo!`;
 
 export const DEFAULT_STORY_CONFIG: StoryConfig = {
-  version: 5,
+  version: 6,
   bookTitle: 'SHREK',
   bookSubtitle: 'UN VIAJE POR LOS REINOS DE MUY MUY LEJANO',
   coverTagline: 'Cada historia tiene un comienzo. Cada camino es una nueva aventura.',
@@ -76,7 +76,7 @@ export const DEFAULT_STORY_CONFIG: StoryConfig = {
     sfxEnabled: true,
     voiceEnabled: true,
     autoNarrate: true,
-    geminiBoardEnabled: false,
+    geminiBoardEnabled: true,
     customAmbientMusicUrl: '',
     customDiscoverySfxUrl: '',
   },

@@ -1,5 +1,6 @@
 import { CHARACTER_VOICE_IDS } from '../data/voiceProfiles';
 import { AudioSettings, CharacterId, VoiceId, VoiceProfile } from '../types/story';
+import { transformWavDataUrl } from './pitchProcessor';
 import { soundEngine } from './soundEngine';
 
 export type SpeechStatus = 'idle' | 'loading' | 'speaking' | 'paused';
@@ -41,10 +42,18 @@ export interface ExpressiveProsody {
   lang: string;
 }
 
+export interface BrowserVoiceDiagnostics {
+  selectedVoiceName: string;
+  selectedVoiceLang: string;
+  isLocalVoice: boolean;
+  matchedGender: boolean;
+  esVoiceCount: number;
+}
+
 const FEMALE_VOICE_PATTERN =
-  /monica|mónica|paulina|helena|sabina|laura|elena|lucia|lucía|paloma|elvira|dalia|salome|salomé|camila|isabela|valeria|ximena|carmen|sofia|sofía|catalina|angelica|angélica|marisol|female|mujer|femenin/i;
+  /monica|mónica|paulina|helena|sabina|laura|elena|lucia|lucía|paloma|elvira|dalia|salome|salomé|camila|isabela|valeria|ximena|carmen|sofia|sofía|catalina|angelica|angélica|marisol|conchita|lupe|mia|mía|penelope|penélope|esperanza|francisca|andrea|flor|shelley|sandy|grandma|google español(?! de estados)|female|mujer|femenin/i;
 const MALE_VOICE_PATTERN =
-  /jorge|diego|pablo|raul|raúl|carlos|juan|alvaro|álvaro|enrique|tomas|tomás|alonso|emilio|mateo|andres|andrés|antonio|miguel|rodrigo|lorenzo|sebas|sebastian|sebastián|male|hombre|masculin/i;
+  /jorge|diego|pablo|raul|raúl|carlos|juan|alvaro|álvaro|enrique|tomas|tomás|alonso|emilio|mateo|andres|andrés|antonio|miguel|rodrigo|lorenzo|sebas|sebastian|sebastián|gonzalo|eddy|reed|rocko|grandpa|male|hombre|masculin/i;
 
 const CHARACTER_VOICE_SLOT: Record<CharacterId, number> = {
   shrek: 0,
@@ -158,7 +167,7 @@ export function computeExpressiveProsody(
   }
 
   return {
-    pitch: Math.max(0.5, Math.min(1.9, basePitch + pitchDelta)),
+    pitch: Math.max(0.48, Math.min(2.0, basePitch + pitchDelta)),
     rate: Math.max(0.7, Math.min(1.45, baseRate + rateDelta)),
     volume: Math.max(0, Math.min(1, masterVolume * charVol)),
     lang: 'es-MX',
@@ -178,12 +187,13 @@ class AudioService {
     sfxEnabled: true,
     voiceEnabled: true,
     autoNarrate: true,
-    geminiBoardEnabled: false,
+    geminiBoardEnabled: true,
     customAmbientMusicUrl: '',
     customDiscoverySfxUrl: '',
   };
 
   private clientAudioCache = new Map<string, string>();
+  private sculptedAudioCache = new Map<string, string>();
   private geminiQuotaBlockedUntil = 0;
   private speakSequence = 0;
   private queueToken = 0;
@@ -239,6 +249,7 @@ class AudioService {
 
   public clearCache(): void {
     this.clientAudioCache.clear();
+    this.sculptedAudioCache.clear();
   }
 
   private refreshVoices(): void {
@@ -255,7 +266,8 @@ class AudioService {
   }
 
   /**
-   * Selects a Latin American Spanish voice across all 9 characters (zero Castilian override).
+   * Selects a Latin American Spanish voice across all 9 characters (zero Castilian override),
+   * preferring matching gender and local pitch-capable OS voices when available.
    */
   private pickLatinSpanishVoice(characterId: CharacterId): SpeechSynthesisVoice | null {
     if (this.voicesCache.length === 0) this.refreshVoices();
@@ -265,6 +277,8 @@ class AudioService {
     if (esVoices.length === 0) return null;
 
     const wantsFemale = this.wantsFemaleVoice(characterId);
+    const profilePitch = this.profiles?.[characterId]?.pitch ?? 1.0;
+    const needsExtremePitch = profilePitch <= 0.72 || profilePitch >= 1.45;
 
     const scoreVoice = (voice: SpeechSynthesisVoice): number => {
       let score = 0;
@@ -275,11 +289,11 @@ class AudioService {
       const isMale = MALE_VOICE_PATTERN.test(name);
 
       if (wantsFemale) {
-        if (isFemale) score += 25;
-        if (isMale) score -= 25;
+        if (isFemale) score += 35;
+        if (isMale) score -= 35;
       } else {
-        if (isMale) score += 25;
-        if (isFemale) score -= 25;
+        if (isMale) score += 35;
+        if (isFemale) score -= 35;
       }
 
       if (/es-(419|mx|us|co|ar|cl|pe)/.test(lang)) {
@@ -288,8 +302,11 @@ class AudioService {
         score -= 4;
       }
 
-      if (/natural|neural|online/i.test(name)) {
-        score += 4;
+      // Local OS voices obey SpeechSynthesisUtterance.pitch much more faithfully than Chrome remote Google voices
+      if (voice.localService && needsExtremePitch) {
+        score += 14;
+      } else if (/natural|neural|online/i.test(name)) {
+        score += 5;
       } else if (/google|microsoft/i.test(name)) {
         score += 2;
       }
@@ -305,6 +322,25 @@ class AudioService {
     );
     const slot = CHARACTER_VOICE_SLOT[characterId] ?? 0;
     return bestGenderGroup[slot % bestGenderGroup.length]?.voice ?? scored[0].voice;
+  }
+
+  public getBrowserVoiceDiagnostics(characterId: CharacterId): BrowserVoiceDiagnostics {
+    if (this.voicesCache.length === 0) this.refreshVoices();
+    const esVoices = this.voicesCache.filter((v) => v.lang.toLowerCase().startsWith('es'));
+    const picked = this.pickLatinSpanishVoice(characterId);
+    const wantsFemale = this.wantsFemaleVoice(characterId);
+    const matchedGender = picked
+      ? wantsFemale
+        ? FEMALE_VOICE_PATTERN.test(picked.name)
+        : MALE_VOICE_PATTERN.test(picked.name)
+      : false;
+    return {
+      selectedVoiceName: picked?.name ?? 'Predeterminada del navegador',
+      selectedVoiceLang: picked?.lang ?? 'es-MX',
+      isLocalVoice: Boolean(picked?.localService),
+      matchedGender,
+      esVoiceCount: esVoices.length,
+    };
   }
 
   public prefetch(_characterId: CharacterId, _text: string): void {
@@ -363,7 +399,7 @@ class AudioService {
         actingInstruction: acting,
         expressivity: profile?.expressivity ?? 0.8,
         rate: profile?.rate ?? 1.0,
-        useLiteModel: params.useLiteModel ?? false,
+        useLiteModel: params.useLiteModel ?? true,
       }),
     });
 
@@ -455,7 +491,7 @@ class AudioService {
         characterId: request.characterId,
         text: cleanText,
         actingInstruction: acting,
-        useLiteModel: request.characterId === 'narrador',
+        useLiteModel: true,
       })
         .then(({ dataUrl }) => {
           if (seq !== this.speakSequence) return;
@@ -554,6 +590,7 @@ class AudioService {
     audioUrl: string,
     onEnd?: () => void,
     characterId: CharacterId = 'narrador',
+    skipPitchSculpt = false,
   ): void {
     this.queueToken += 1;
     this.stopInternal(false);
@@ -572,12 +609,46 @@ class AudioService {
         onEnd,
       },
       seq,
+      skipPitchSculpt,
     );
   }
 
-  private playAudioElement(audioUrl: string, request: SpeakRequest, seq: number): void {
+  private getSculptedWavUrl(audioUrl: string, characterId: CharacterId): string {
+    if (!/^data:audio\/wav;base64,/i.test(audioUrl)) {
+      return audioUrl;
+    }
+    const profile = this.profiles?.[characterId];
+    if (!profile) return audioUrl;
+
+    const sculptKey = `${audioUrl.length}:${audioUrl.slice(-48)}:${profile.pitch.toFixed(2)}:${profile.rate.toFixed(2)}:${profile.gender ?? 'm'}:${profile.register ?? 'medio'}`;
+    const hit = this.sculptedAudioCache.get(sculptKey);
+    if (hit) return hit;
+
+    const sculpted = transformWavDataUrl(audioUrl, {
+      pitch: profile.pitch,
+      rate: profile.rate,
+      gender: profile.gender,
+      register: profile.register,
+    });
+    if (this.sculptedAudioCache.size >= 40) {
+      const oldest = this.sculptedAudioCache.keys().next().value;
+      if (oldest) this.sculptedAudioCache.delete(oldest);
+    }
+    this.sculptedAudioCache.set(sculptKey, sculpted);
+    return sculpted;
+  }
+
+  private playAudioElement(
+    audioUrl: string,
+    request: SpeakRequest,
+    seq: number,
+    skipPitchSculpt = false,
+  ): void {
     if (seq !== this.speakSequence) return;
-    const el = new Audio(audioUrl);
+    const finalUrl = skipPitchSculpt
+      ? audioUrl
+      : this.getSculptedWavUrl(audioUrl, request.characterId);
+    const el = new Audio(finalUrl);
     const charVol = this.profiles?.[request.characterId]?.volume ?? 1.0;
     el.volume = Math.max(0, Math.min(1, this.settings.masterVolume * charVol));
     this.currentAudioEl = el;

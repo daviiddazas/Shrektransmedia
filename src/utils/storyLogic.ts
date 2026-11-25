@@ -347,6 +347,9 @@ export function validateStoryConfigJson(rawJson: string): ConfigValidationResult
       audioSettings: {
         ...DEFAULT_STORY_CONFIG.audioSettings,
         ...(parsed.audioSettings ?? {}),
+        ...(isLegacyVoiceVersion
+          ? { geminiBoardEnabled: DEFAULT_STORY_CONFIG.audioSettings.geminiBoardEnabled }
+          : {}),
       },
     };
 
